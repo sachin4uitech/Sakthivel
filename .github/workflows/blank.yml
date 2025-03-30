@@ -1,0 +1,8 @@
+water_supplier_website/
+│── app.py              # Main Flask backend
+│── templates/          
+│   ├── index.html      # Application form page
+│   ├── success.html    # Confirmation page
+│── static/             
+│   ├── style.css       # CSS styling
+│── database.db         # SQLite database
