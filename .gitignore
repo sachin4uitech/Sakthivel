@@ -1,174 +1,128 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail, Message
+from twilio.rest import Client
+from fpdf import FPDF
 
-# C extensions
-*.so
+app = Flask(__name__)
+app.secret_key = "your_secret_key"
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+# Database Configuration
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+# Email Configuration (Use your credentials)
+app.config["MAIL_SERVER"] = "smtp.gmail.com"
+app.config["MAIL_PORT"] = 587
+app.config["MAIL_USERNAME"] = "yourcompany@gmail.com"
+app.config["MAIL_PASSWORD"] = "yourpassword"
+app.config["MAIL_USE_TLS"] = True
+mail = Mail(app)
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# Twilio Configuration (Replace with your credentials)
+TWILIO_SID = "your_twilio_sid"
+TWILIO_AUTH_TOKEN = "your_twilio_auth_token"
+TWILIO_PHONE_NUMBER = "your_twilio_phone_number"
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
+# Database Model
+class Order(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    customer_name = db.Column(db.String(100), nullable=False)
+    contact = db.Column(db.String(15), nullable=False)
+    email = db.Column(db.String(100), nullable=False)
+    address = db.Column(db.String(200), nullable=False)
+    receiver_name = db.Column(db.String(100), nullable=False)
+    receiver_contact = db.Column(db.String(15), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    bottle_size = db.Column(db.String(10), nullable=False)
+    payment_method = db.Column(db.String(50), nullable=False)
 
-# Translations
-*.mo
-*.pot
+# Function to send email
+def send_email(receiver_email, receiver_name, order_details):
+    try:
+        msg = Message("Water Delivery Confirmation", sender="yourcompany@gmail.com", recipients=[receiver_email])
+        msg.body = f"Hello {receiver_name},\n\nYour order has been placed successfully.\n\n{order_details}\n\nThank you!"
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print("Email Error:", e)
+        return False
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+# Function to send SMS
+def send_sms(receiver_contact, receiver_name):
+    try:
+        client = Client(TWILIO_SID, TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body=f"Hello {receiver_name}, your water supply order has been placed successfully.",
+            from_=TWILIO_PHONE_NUMBER,
+            to=receiver_contact
+        )
+        return True
+    except Exception as e:
+        print("SMS Error:", e)
+        return False
 
-# Flask stuff:
-instance/
-.webassets-cache
+# Function to generate PDF receipt
+def generate_pdf(customer_name, receiver_name, order_details):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, "Water Supplier Order Receipt", ln=True, align='C')
+    pdf.ln(10)
+    pdf.multi_cell(0, 10, f"Customer Name: {customer_name}\nReceiver Name: {receiver_name}\n\n{order_details}")
+    pdf.output("static/Water_Order_Receipt.pdf")
 
-# Scrapy stuff:
-.scrapy
+# Route for homepage
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        # Get Form Data
+        customer_name = request.form["customer_name"]
+        contact = request.form["contact"]
+        email = request.form["email"]
+        address = request.form["address"]
+        receiver_name = request.form["receiver_name"]
+        receiver_contact = request.form["receiver_contact"]
+        quantity = request.form["quantity"]
+        bottle_size = request.form["bottle_size"]
+        payment_method = request.form["payment_method"]
 
-# Sphinx documentation
-docs/_build/
+        # Save to database
+        order = Order(customer_name=customer_name, contact=contact, email=email, address=address,
+                      receiver_name=receiver_name, receiver_contact=receiver_contact,
+                      quantity=quantity, bottle_size=bottle_size, payment_method=payment_method)
+        db.session.add(order)
+        db.session.commit()
 
-# PyBuilder
-.pybuilder/
-target/
+        # Prepare order details
+        order_details = f"""
+        Customer Name: {customer_name}
+        Contact: {contact}
+        Email: {email}
+        Address: {address}
+        Receiver Name: {receiver_name}
+        Receiver Contact: {receiver_contact}
+        Quantity: {quantity} bottles
+        Bottle Size: {bottle_size}
+        Payment Method: {payment_method}
+        """
 
-# Jupyter Notebook
-.ipynb_checkpoints
+        # Send email & SMS, Generate PDF
+        send_email(email, receiver_name, order_details)
+        send_sms(receiver_contact, receiver_name)
+        generate_pdf(customer_name, receiver_name, order_details)
 
-# IPython
-profile_default/
-ipython_config.py
+        flash("Order placed successfully! A confirmation email & SMS have been sent.")
+        return redirect(url_for("success"))
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+    return render_template("index.html")
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+# Success Page
+@app.route("/success")
+def success():
+    return render_template("success.html")
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/latest/usage/project/#working-with-version-control
-.pdm.toml
-.pdm-python
-.pdm-build/
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
+if __name__ == "__main__":
+    db.create_all()
+    app.run(debug=True)
